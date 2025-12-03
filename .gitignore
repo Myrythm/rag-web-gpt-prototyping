@@ -1,0 +1,5 @@
+.env
+venv/
+chroma/
+rag_web.db
+frontend/node_modules/
