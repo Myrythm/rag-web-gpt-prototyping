@@ -3,3 +3,5 @@ venv/
 chroma/
 rag_web.db
 frontend/node_modules/
+backend/__pycache__
+backend/chains/__pycache__

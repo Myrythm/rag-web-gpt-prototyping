@@ -9,7 +9,7 @@ def classify_query(query: str) -> bool:
     Returns True if RAG is needed, False otherwise.
     """
     llm = ChatOpenAI(
-        model="gpt-4.1-mini",  # Fast model for classification
+        model="gpt-4.1-mini",  
         temperature=0,
         openai_api_key=settings.OPENAI_API_KEY
     )

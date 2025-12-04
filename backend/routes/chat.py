@@ -16,6 +16,14 @@ from backend.services.sqlite_client import (
 import uuid
 import json
 import asyncio
+import logging
+
+# Setup logging
+logger = logging.getLogger(__name__)
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
 
 router = APIRouter(tags=["chat"])
 
@@ -109,8 +117,17 @@ async def chat_stream(request: ChatRequest, current_user: dict = Depends(require
             # Import classifier
             from backend.chains.query_classifier import classify_query
             
+            # Log the incoming query
+            logger.info(f"Received query: '{request.query[:50]}...' (User: {current_user['username']})")
+            
             # Classify if query needs RAG
             needs_rag = await asyncio.to_thread(classify_query, request.query)
+            
+            # Log classification result
+            if needs_rag:
+                logger.info(f"USED RAG")
+            else:
+                logger.info(f"NOT USED RAG")
             
             # Send session_id first
             yield f"data: {json.dumps({'type': 'session_id', 'session_id': session_id})}\n\n"
@@ -122,11 +139,13 @@ async def chat_stream(request: ChatRequest, current_user: dict = Depends(require
                 from backend.chains.rag_chain import get_rag_chain_streaming
                 chain, retriever = get_rag_chain_streaming()
                 
+                logger.info(f"Retrieving documents from vector store...")
                 # Get context documents
                 docs = await asyncio.to_thread(
                     retriever.invoke,
                     request.query
                 )
+                logger.info(f"RETRIEVED {len(docs)} documents")
                 
                 # Stream the response with context
                 async for chunk in chain.astream({
@@ -142,6 +161,7 @@ async def chat_stream(request: ChatRequest, current_user: dict = Depends(require
                 from backend.chains.rag_chain import get_simple_chat_chain
                 chain = get_simple_chat_chain()
                 
+                logger.info(f"Using simple chat (no document retrieval)")
                 # Stream the response without RAG overhead
                 async for chunk in chain.astream({
                     "question": request.query,
@@ -154,10 +174,14 @@ async def chat_stream(request: ChatRequest, current_user: dict = Depends(require
             # Save assistant message
             await create_chat_message(user_id, "assistant", full_response, session_id)
             
+            # Log completion
+            logger.info(f"Response completed ({len(full_response)} chars) - Mode: {'RAG' if needs_rag else 'Simple Chat'}")
+            
             # Send done signal
             yield f"data: {json.dumps({'type': 'done'})}\n\n"
             
         except Exception as e:
+            logger.error(f"Error processing query: {str(e)}")
             yield f"data: {json.dumps({'type': 'error', 'message': str(e)})}\n\n"
     
     return StreamingResponse(
