@@ -6,7 +6,6 @@
 ![FastAPI](https://img.shields.io/badge/FastAPI-0.109+-green.svg)
 ![Vue](https://img.shields.io/badge/Vue-3.4+-brightgreen.svg)
 
-
 **A modern Retrieval-Augmented Generation (RAG) web application with document management and intelligent chat capabilities.**
 
 [Demo](#) · [Report Bug](https://github.com/Myrythm/rag-web-gpt/issues) · [Request Feature](https://github.com/Myrythm/rag-web-gpt/issues)
@@ -24,7 +23,6 @@
 - [Configuration](#-configuration)
 - [Usage](#-usage)
 - [Project Structure](#-project-structure)
-  
 
 ---
 
@@ -196,7 +194,6 @@ rag-web-gpt/
 ```
 
 ---
-
 
 <div align="center">
   

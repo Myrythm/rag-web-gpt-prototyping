@@ -161,20 +161,6 @@
             :key="index"
             :message="msg"
           />
-
-          <!-- Loading -->
-          <div v-if="chatStore.loading" class="flex justify-start">
-            <div class="bg-gray-800/50 backdrop-blur-xl border border-gray-700/50 p-3 md:p-4 rounded-2xl rounded-bl-none shadow-lg">
-              <div class="flex items-center gap-2">
-                <div class="flex space-x-1">
-                  <div class="w-1.5 h-1.5 md:w-2 md:h-2 bg-blue-400 rounded-full animate-bounce" style="animation-delay: 0ms"></div>
-                  <div class="w-1.5 h-1.5 md:w-2 md:h-2 bg-blue-400 rounded-full animate-bounce" style="animation-delay: 150ms"></div>
-                  <div class="w-1.5 h-1.5 md:w-2 md:h-2 bg-blue-400 rounded-full animate-bounce" style="animation-delay: 300ms"></div>
-                </div>
-                <span class="text-gray-400 text-xs md:text-sm ml-2">Thinking...</span>
-              </div>
-            </div>
-          </div>
         </div>
       </div>
 

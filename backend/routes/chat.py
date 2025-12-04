@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
-from backend.chains.rag_chain import get_rag_chain
+from backend.chains.rag_chain import get_rag_chain, get_rag_chain_streaming
 from backend.utils.security import require_user
 from typing import Optional
 from backend.services.sqlite_client import (
@@ -13,6 +14,8 @@ from backend.services.sqlite_client import (
     delete_session
 )
 import uuid
+import json
+import asyncio
 
 router = APIRouter(tags=["chat"])
 
@@ -79,3 +82,90 @@ async def delete_session_route(session_id: str, current_user: dict = Depends(req
     
     await delete_session(session_id)
     return {"status": "deleted", "id": session_id}
+
+@router.post("/chat/stream")
+async def chat_stream(request: ChatRequest, current_user: dict = Depends(require_user)):
+    """Stream chat responses using Server-Sent Events"""
+    user = await get_user_by_username(current_user["username"])
+    user_id = user["id"]
+    
+    session_id = request.session_id
+    
+    # Create session if not exists
+    if not session_id:
+        session_id = str(uuid.uuid4())
+        title = request.query[:30] + "..." if len(request.query) > 30 else request.query
+        await create_chat_session(session_id, user_id, title)
+    
+    # Get history
+    history = await get_chat_history(session_id)
+    formatted_history = "\n".join([f"{msg['role']}: {msg['content']}" for msg in history])
+    
+    # Save user message
+    await create_chat_message(user_id, "user", request.query, session_id)
+    
+    async def generate():
+        try:
+            # Import classifier
+            from backend.chains.query_classifier import classify_query
+            
+            # Classify if query needs RAG
+            needs_rag = await asyncio.to_thread(classify_query, request.query)
+            
+            # Send session_id first
+            yield f"data: {json.dumps({'type': 'session_id', 'session_id': session_id})}\n\n"
+            
+            full_response = ""
+            
+            if needs_rag:
+                # Use RAG for document-based queries
+                from backend.chains.rag_chain import get_rag_chain_streaming
+                chain, retriever = get_rag_chain_streaming()
+                
+                # Get context documents
+                docs = await asyncio.to_thread(
+                    retriever.invoke,
+                    request.query
+                )
+                
+                # Stream the response with context
+                async for chunk in chain.astream({
+                    "context": docs,
+                    "question": request.query,
+                    "chat_history": formatted_history
+                }):
+                    if chunk:
+                        full_response += chunk
+                        yield f"data: {json.dumps({'type': 'token', 'content': chunk})}\n\n"
+            else:
+                # Use simple chat for conversational queries (much faster!)
+                from backend.chains.rag_chain import get_simple_chat_chain
+                chain = get_simple_chat_chain()
+                
+                # Stream the response without RAG overhead
+                async for chunk in chain.astream({
+                    "question": request.query,
+                    "chat_history": formatted_history
+                }):
+                    if chunk:
+                        full_response += chunk
+                        yield f"data: {json.dumps({'type': 'token', 'content': chunk})}\n\n"
+            
+            # Save assistant message
+            await create_chat_message(user_id, "assistant", full_response, session_id)
+            
+            # Send done signal
+            yield f"data: {json.dumps({'type': 'done'})}\n\n"
+            
+        except Exception as e:
+            yield f"data: {json.dumps({'type': 'error', 'message': str(e)})}\n\n"
+    
+    return StreamingResponse(
+        generate(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no"
+        }
+    )
