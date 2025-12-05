@@ -28,6 +28,7 @@ from backend.services.langsmith_client import get_recent_traces
 from pydantic import BaseModel
 from backend.utils.security import get_password_hash
 from backend.services.sqlite_client import get_user_by_username, create_user
+from backend.services.semantic_cache import get_semantic_cache
 
 router = APIRouter(prefix="/admin", tags=["admin"])
 
@@ -186,3 +187,20 @@ async def delete_user_route(user_id: str, current_user: dict = Depends(require_a
     
     await delete_user(user_id)
     return {"status": "deleted", "id": user_id}
+
+@router.delete("/cache")
+async def clear_cache(current_user: dict = Depends(require_admin)):
+    """Clear all semantic cache entries"""
+    cache = get_semantic_cache()
+    cleared_count = cache.clear()
+    return {
+        "status": "cleared",
+        "entries_cleared": cleared_count,
+        "cache_stats": cache.get_stats()
+    }
+
+@router.get("/cache/stats")
+async def get_cache_stats(current_user: dict = Depends(require_admin)):
+    """Get semantic cache statistics"""
+    cache = get_semantic_cache()
+    return cache.get_stats()

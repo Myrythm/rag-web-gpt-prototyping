@@ -10,14 +10,14 @@ __pycache__/
 
 # Database
 rag_web.db
-.langchain.db
+langchain.db
 
 # ChromaDB
 chroma/
 
 # Frontend
 frontend/node_modules/
-frontend/dist/
+
 
 # IDE
 .vscode/

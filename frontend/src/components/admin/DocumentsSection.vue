@@ -34,14 +34,33 @@
 
     <!-- Documents List -->
     <div class="bg-gray-800/50 backdrop-blur-xl border border-gray-700/50 p-8 rounded-2xl">
-      <div class="flex items-center gap-3 mb-6">
-        <div class="p-3 bg-purple-500/10 rounded-xl">
-          <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6 text-purple-400" viewBox="0 0 20 20" fill="currentColor">
-            <path d="M9 2a2 2 0 00-2 2v8a2 2 0 002 2h6a2 2 0 002-2V6.414A2 2 0 0016.414 5L14 2.586A2 2 0 0012.586 2H9z" />
-            <path d="M3 8a2 2 0 012-2v10h8a2 2 0 01-2 2H5a2 2 0 01-2-2V8z" />
-          </svg>
+      <div class="flex items-center justify-between mb-6">
+        <div class="flex items-center gap-3">
+          <div class="p-3 bg-purple-500/10 rounded-xl">
+            <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6 text-purple-400" viewBox="0 0 20 20" fill="currentColor">
+              <path d="M9 2a2 2 0 00-2 2v8a2 2 0 002 2h6a2 2 0 002-2V6.414A2 2 0 0016.414 5L14 2.586A2 2 0 0012.586 2H9z" />
+              <path d="M3 8a2 2 0 012-2v10h8a2 2 0 01-2 2H5a2 2 0 01-2-2V8z" />
+            </svg>
+          </div>
+          <h3 class="text-xl font-bold text-white">Document Library</h3>
         </div>
-        <h3 class="text-xl font-bold text-white">Document Library</h3>
+        
+        <!-- Clear Cache Button -->
+        <div class="flex items-center gap-3">
+          <span v-if="cacheStats" class="text-sm text-gray-400">
+            Cache: {{ cacheStats.total_entries }} entries
+          </span>
+          <button
+            @click="clearCache"
+            :disabled="clearingCache"
+            class="flex items-center gap-2 px-4 py-2 bg-orange-500/10 hover:bg-orange-500/20 text-orange-400 hover:text-orange-300 border border-orange-500/30 rounded-xl transition-all font-medium disabled:opacity-50"
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+            </svg>
+            {{ clearingCache ? 'Clearing...' : 'Clear Cache' }}
+          </button>
+        </div>
       </div>
       
       <!-- Search -->
@@ -166,7 +185,38 @@ const documents = computed(() => props.documents);
 const selectedFile = ref(null);
 const uploading = ref(false);
 const searchQuery = ref("");
+const cacheStats = ref(null);
+const clearingCache = ref(false);
 let searchTimeout = null;
+
+// Fetch cache stats on mount
+const fetchCacheStats = async () => {
+  try {
+    const response = await api.get('/admin/cache/stats');
+    cacheStats.value = response.data;
+  } catch (e) {
+    console.error('Failed to fetch cache stats:', e);
+  }
+};
+
+const clearCache = async () => {
+  if (!confirm('Are you sure you want to clear all cached responses? This will cause new API calls for repeated questions.')) return;
+  
+  clearingCache.value = true;
+  try {
+    const response = await api.delete('/admin/cache');
+    alert(`Cache cleared! ${response.data.entries_cleared} entries removed.`);
+    cacheStats.value = response.data.cache_stats;
+  } catch (e) {
+    alert('Failed to clear cache');
+    console.error(e);
+  } finally {
+    clearingCache.value = false;
+  }
+};
+
+// Fetch stats on mount
+fetchCacheStats();
 
 const handleSearch = () => {
   if (searchTimeout) clearTimeout(searchTimeout);

@@ -21,30 +21,17 @@ async def startup_event():
     setup_langsmith()
     await init_db()
     
-    # Setup LLM Cache
+    # Initialize Semantic Cache
+    # Note: Using semantic cache instead of LangChain's SQLiteCache
+    # because SQLiteCache doesn't work with streaming responses
     try:
-        from langchain_community.cache import SQLiteCache
-        import os
-        import langchain
-        
-        # Ensure directory exists if path contains directory
-        cache_dir = os.path.dirname(settings.LLM_CACHE_PATH)
-        if cache_dir and not os.path.exists(cache_dir):
-            os.makedirs(cache_dir)
-            
-        cache = SQLiteCache(database_path=settings.LLM_CACHE_PATH)
-            
-        try:
-            # Try new way (LangChain >= 0.1.0)
-            from langchain.globals import set_llm_cache
-            set_llm_cache(cache)
-        except ImportError:
-            # Fallback to old way (LangChain < 0.1.0)
-            langchain.llm_cache = cache
-            
-        print(f"LLM Cache initialized at {settings.LLM_CACHE_PATH}")
+        from backend.services.semantic_cache import get_semantic_cache
+        cache = get_semantic_cache()
+        stats = cache.get_stats()
+        print(f"Semantic Cache initialized: {stats['total_entries']} entries cached")
     except Exception as e:
-        print(f"Failed to initialize LLM Cache: {e}")
+        print(f"Failed to initialize Semantic Cache: {e}")
+
 
 app.include_router(auth.router, prefix=settings.API_V1_STR + "/auth")
 app.include_router(admin.router, prefix=settings.API_V1_STR)

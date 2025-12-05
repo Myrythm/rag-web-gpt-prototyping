@@ -172,25 +172,58 @@ After running `create_admin.py`, you can log in with:
 ```
 rag-web-gpt/
 ├── backend/
-│   ├── chains/              # LangChain RAG logic
-│   ├── routes/              # API endpoints
-│   ├── services/            # Business logic (DB, embedding, chunking)
-│   ├── utils/               # Utilities (auth, security, config)
-│   └── main.py              # FastAPI app entry point
+│   ├── chains/                     # LangChain RAG logic
+│   │   ├── rag_chain.py            # RAG chain with streaming support
+│   │   └── retriever_chroma.py     # ChromaDB retriever
+│   ├── routes/                     # API endpoints
+│   │   ├── admin.py                # Admin management endpoints
+│   │   ├── auth.py                 # Authentication endpoints
+│   │   └── chat.py                 # Chat & cache endpoints
+│   ├── services/                   # Business logic
+│   │   ├── chroma_client.py        # ChromaDB client
+│   │   ├── chunker.py              # Text chunking for documents
+│   │   ├── embedding_model.py      # OpenAI embeddings
+│   │   ├── langsmith_client.py     # LangSmith tracing
+│   │   ├── semantic_cache.py       # Semantic caching service
+│   │   └── sqlite_client.py        # SQLite database operations
+│   ├── utils/                      # Utilities
+│   │   ├── config.py               # App configuration
+│   │   └── security.py             # Auth & JWT handling
+│   └── main.py                     # FastAPI app entry point
 ├── frontend/
 │   ├── src/
-│   │   ├── components/      # Vue components (admin, chat, common)
-│   │   ├── pages/           # Page components
-│   │   ├── router/          # Vue Router configuration
-│   │   ├── stores/          # Pinia state management
-│   │   └── utils/           # Frontend utilities
-│   └── index.html           # Main HTML file
-├── chroma/                  # ChromaDB vector storage (auto-generated)
-├── .env                     # Environment variables (create this)
-├── .env.example             # Example environment file
-├── create_admin.py          # Script to create admin user
-├── requirements.txt         # Python dependencies
-└── README.md                # You are here!
+│   │   ├── components/
+│   │   │   ├── admin/              # Admin dashboard components
+│   │   │   │   ├── DocumentsSection.vue
+│   │   │   │   ├── OverviewSection.vue
+│   │   │   │   ├── Sidebar.vue
+│   │   │   │   └── UsersSection.vue
+│   │   │   ├── chat/               # Chat components
+│   │   │   │   ├── ChatInput.vue
+│   │   │   │   ├── ChatMessage.vue
+│   │   │   │   └── MarkdownRenderer.vue
+│   │   │   └── common/             # Shared components
+│   │   │       └── Pagination.vue
+│   │   ├── pages/                  # Page components
+│   │   │   ├── AdminDashboard.vue
+│   │   │   ├── Login.vue
+│   │   │   └── UserChat.vue
+│   │   ├── router/                 # Vue Router configuration
+│   │   ├── stores/                 # Pinia state management
+│   │   │   ├── chat.js             # Chat state
+│   │   │   ├── theme.js            # Theme state
+│   │   │   └── user.js             # User auth state
+│   │   ├── utils/                  # Frontend utilities
+│   │   ├── App.vue                 # Root component
+│   │   └── main.js                 # Vue entry point
+│   └── index.html                  # Main HTML file
+├── chroma/                         # ChromaDB vector storage (auto-generated)
+├── .env                            # Environment variables (create this)
+├── .env.example                    # Example environment file
+├── .gitignore                      # Git ignore rules
+├── create_admin.py                 # Script to create admin user
+├── requirements.txt                # Python dependencies
+└── README.md                       # You are here!
 ```
 
 ---
