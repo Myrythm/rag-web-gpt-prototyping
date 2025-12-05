@@ -4,7 +4,7 @@ from pydantic_settings import BaseSettings
 class Settings(BaseSettings):
     PROJECT_NAME: str = "RAG Web"
     API_V1_STR: str = "/api/v1"
-    SECRET_KEY: str = "CHANGE_THIS_SECRET_KEY"  # In production, use a strong secret
+    SECRET_KEY: str = "NGAPAIN-YAK"  
     ALGORITHM: str = "HS256"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 60 * 24  # 1 day
 

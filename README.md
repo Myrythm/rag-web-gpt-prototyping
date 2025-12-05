@@ -178,13 +178,12 @@ rag-web-gpt/
 │   ├── routes/                     # API endpoints
 │   │   ├── admin.py                # Admin management endpoints
 │   │   ├── auth.py                 # Authentication endpoints
-│   │   └── chat.py                 # Chat & cache endpoints
+│   │   └── chat.py                 # Chat endpoints
 │   ├── services/                   # Business logic
 │   │   ├── chroma_client.py        # ChromaDB client
 │   │   ├── chunker.py              # Text chunking for documents
 │   │   ├── embedding_model.py      # OpenAI embeddings
 │   │   ├── langsmith_client.py     # LangSmith tracing
-│   │   ├── semantic_cache.py       # Semantic caching service
 │   │   └── sqlite_client.py        # SQLite database operations
 │   ├── utils/                      # Utilities
 │   │   ├── config.py               # App configuration

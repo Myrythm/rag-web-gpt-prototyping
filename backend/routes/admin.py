@@ -21,16 +21,85 @@ from backend.services.sqlite_client import (
 )
 from backend.services.chunker import chunk_text
 from backend.chains.retriever_chroma import get_vectorstore
-from backend.utils.security import require_admin
-from backend.utils.security import require_admin
+from backend.utils.security import require_admin, get_password_hash
 from backend.utils.config import settings
 from backend.services.langsmith_client import get_recent_traces
 from pydantic import BaseModel
-from backend.utils.security import get_password_hash
-from backend.services.sqlite_client import get_user_by_username, create_user
-from backend.services.semantic_cache import get_semantic_cache
 
 router = APIRouter(prefix="/admin", tags=["admin"])
+
+
+def extract_text_with_tables(doc) -> str:
+    """
+    Extract text from PDF with better table handling.
+    Uses PyMuPDF's table detection to preserve table structure.
+    """
+    full_text = []
+    
+    for page_num, page in enumerate(doc):
+        page_text_parts = []
+        
+        # Try to find tables on this page
+        try:
+            tables = page.find_tables()
+            
+            if tables.tables:
+                # Page has tables - extract them with structure
+                for table in tables.tables:
+                    table_data = table.extract()
+                    
+                    if table_data:
+                        # Format table as structured text
+                        # Each row becomes a clear line with column headers context
+                        headers = table_data[0] if table_data else []
+                        
+                        for row_idx, row in enumerate(table_data):
+                            if row_idx == 0:
+                                # Header row
+                                header_text = " | ".join([str(cell) if cell else "" for cell in row])
+                                page_text_parts.append(f"[Table Header]: {header_text}")
+                            else:
+                                # Data row - pair with headers for context
+                                row_parts = []
+                                for col_idx, cell in enumerate(row):
+                                    if cell:
+                                        header = headers[col_idx] if col_idx < len(headers) and headers[col_idx] else f"Column{col_idx+1}"
+                                        row_parts.append(f"{header}: {cell}")
+                                
+                                if row_parts:
+                                    page_text_parts.append(" | ".join(row_parts))
+                        
+                        page_text_parts.append("")  # Empty line after table
+                
+                # Also get non-table text from the page
+                # Get text blocks and filter out those that overlap with tables
+                non_table_text = []
+                blocks = page.get_text("blocks")
+                table_rects = [fitz.Rect(t.bbox) for t in tables.tables]
+                
+                for block in blocks:
+                    if block[6] == 0:  # Text block
+                        block_rect = fitz.Rect(block[:4])
+                        # Check if this block overlaps with any table
+                        is_in_table = any(block_rect.intersects(tr) for tr in table_rects)
+                        if not is_in_table:
+                            non_table_text.append(block[4].strip())
+                
+                if non_table_text:
+                    page_text_parts.insert(0, "\n".join(non_table_text))
+            else:
+                # No tables found - use regular text extraction
+                page_text_parts.append(page.get_text())
+                
+        except Exception as e:
+            # Fallback to regular text extraction if table detection fails
+            page_text_parts.append(page.get_text())
+        
+        if page_text_parts:
+            full_text.append(f"\n--- Page {page_num + 1} ---\n" + "\n".join(page_text_parts))
+    
+    return "\n\n".join(full_text)
+
 
 @router.post("/upload")
 async def upload_document(
@@ -40,12 +109,11 @@ async def upload_document(
     # 1. Read content
     content = await file.read()
     
-    # 2. Extract text using PyMuPDF
+    # 2. Extract text using PyMuPDF with improved table handling
     try:
         doc = fitz.open(stream=content, filetype="pdf")
-        text = ""
-        for page in doc:
-            text += page.get_text()
+        text = extract_text_with_tables(doc)
+        doc.close()
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Error processing PDF: {str(e)}")
     
@@ -71,6 +139,7 @@ async def upload_document(
     
     return {"id": doc_id, "filename": file.filename, "chunks": len(chunks)}
 
+
 @router.get("/documents")
 async def list_documents(
     page: int = 1, 
@@ -89,6 +158,7 @@ async def list_documents(
         "pages": (total + limit - 1) // limit
     }
 
+
 @router.delete("/documents/{doc_id}")
 async def delete_doc(doc_id: str, current_user: dict = Depends(require_admin)):
     # Delete from SQLite
@@ -105,6 +175,7 @@ async def delete_doc(doc_id: str, current_user: dict = Depends(require_admin)):
     
     return {"status": "deleted", "id": doc_id}
 
+
 @router.get("/stats")
 async def get_stats(current_user: dict = Depends(require_admin)):
     doc_count = await get_document_count()
@@ -116,6 +187,7 @@ async def get_stats(current_user: dict = Depends(require_admin)):
         "total_users": user_count,
         "recent_traces": []
     }
+
 
 @router.get("/users")
 async def list_users_route(
@@ -136,15 +208,18 @@ async def list_users_route(
         "pages": (total + limit - 1) // limit
     }
 
+
 class UserCreate(BaseModel):
     username: str
     password: str
     role: str = "user"
 
+
 class UserUpdate(BaseModel):
     username: str
     role: str
     password: str = None
+
 
 @router.post("/users")
 async def create_new_user(user: UserCreate, current_user: dict = Depends(require_admin)):
@@ -164,6 +239,7 @@ async def create_new_user(user: UserCreate, current_user: dict = Depends(require
     await create_user(user_data)
     return {"id": user_id, "username": user.username, "role": user.role}
 
+
 @router.put("/users/{user_id}")
 async def update_user_route(user_id: str, user: UserUpdate, current_user: dict = Depends(require_admin)):
     # Check if username is already taken by another user
@@ -178,6 +254,7 @@ async def update_user_route(user_id: str, user: UserUpdate, current_user: dict =
     await update_user(user_id, user.username, user.role, password_hash)
     return {"id": user_id, "username": user.username, "role": user.role}
 
+
 @router.delete("/users/{user_id}")
 async def delete_user_route(user_id: str, current_user: dict = Depends(require_admin)):
     # Prevent deleting yourself
@@ -187,20 +264,3 @@ async def delete_user_route(user_id: str, current_user: dict = Depends(require_a
     
     await delete_user(user_id)
     return {"status": "deleted", "id": user_id}
-
-@router.delete("/cache")
-async def clear_cache(current_user: dict = Depends(require_admin)):
-    """Clear all semantic cache entries"""
-    cache = get_semantic_cache()
-    cleared_count = cache.clear()
-    return {
-        "status": "cleared",
-        "entries_cleared": cleared_count,
-        "cache_stats": cache.get_stats()
-    }
-
-@router.get("/cache/stats")
-async def get_cache_stats(current_user: dict = Depends(require_admin)):
-    """Get semantic cache statistics"""
-    cache = get_semantic_cache()
-    return cache.get_stats()

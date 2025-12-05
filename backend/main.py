@@ -20,18 +20,6 @@ app.add_middleware(
 async def startup_event():
     setup_langsmith()
     await init_db()
-    
-    # Initialize Semantic Cache
-    # Note: Using semantic cache instead of LangChain's SQLiteCache
-    # because SQLiteCache doesn't work with streaming responses
-    try:
-        from backend.services.semantic_cache import get_semantic_cache
-        cache = get_semantic_cache()
-        stats = cache.get_stats()
-        print(f"Semantic Cache initialized: {stats['total_entries']} entries cached")
-    except Exception as e:
-        print(f"Failed to initialize Semantic Cache: {e}")
-
 
 app.include_router(auth.router, prefix=settings.API_V1_STR + "/auth")
 app.include_router(admin.router, prefix=settings.API_V1_STR)

@@ -17,10 +17,7 @@ from backend.services.sqlite_client import (
     update_session_title,
     delete_session
 )
-from backend.services.semantic_cache import get_semantic_cache
-
 # Note: Using vectorstore similarity score instead of LLM classifier for efficiency
-# Note: Using semantic cache for instant responses on similar queries
             
 # Setup logging
 logger = logging.getLogger(__name__)
@@ -90,36 +87,6 @@ async def chat_stream(request: ChatRequest, current_user: dict = Depends(require
     
     async def generate():
         try:
-            # Get semantic cache
-            semantic_cache = get_semantic_cache()
-            
-            # Check semantic cache first
-            cache_result = await asyncio.to_thread(semantic_cache.get, request.query)
-            
-            if cache_result:
-                cached_response, distance = cache_result
-                logger.info(f"SEMANTIC CACHE HIT (distance: {distance:.4f})")
-                
-                # Send session_id first
-                yield f"data: {json.dumps({'type': 'session_id', 'session_id': session_id})}\n\n"
-                
-                # Send cached response as if streaming (for consistent UX)
-                # Split into chunks for natural streaming feel
-                chunk_size = 20  # characters per chunk
-                for i in range(0, len(cached_response), chunk_size):
-                    chunk = cached_response[i:i + chunk_size]
-                    yield f"data: {json.dumps({'type': 'token', 'content': chunk})}\n\n"
-                    await asyncio.sleep(0.01)  # Small delay for natural feel
-                
-                # Save assistant message
-                await create_chat_message(user_id, "assistant", cached_response, session_id)
-                
-                # Send done signal with cache indicator
-                yield f"data: {json.dumps({'type': 'done', 'cached': True})}\n\n"
-                return
-            
-            # No cache hit - proceed with normal flow
-            logger.info("SEMANTIC CACHE MISS - generating new response")
             
             # Get retriever and chain
             from backend.chains.rag_chain import get_simple_chat_chain
@@ -194,11 +161,8 @@ async def chat_stream(request: ChatRequest, current_user: dict = Depends(require
             # Save assistant message
             await create_chat_message(user_id, "assistant", full_response, session_id)
             
-            # Cache the response for future similar queries
-            await asyncio.to_thread(semantic_cache.set, request.query, full_response)
-            
             # Send done signal
-            yield f"data: {json.dumps({'type': 'done', 'cached': False})}\n\n"
+            yield f"data: {json.dumps({'type': 'done'})}\n\n"
             
         except Exception as e:
             logger.error(f"Error processing query: {str(e)}")
@@ -213,23 +177,3 @@ async def chat_stream(request: ChatRequest, current_user: dict = Depends(require
             "X-Accel-Buffering": "no"
         }
     )
-
-
-# ============== Cache Management Endpoints ==============
-
-@router.get("/cache/stats")
-async def get_cache_stats(current_user: dict = Depends(require_admin)):
-    """Get semantic cache statistics (admin only)"""
-    cache = get_semantic_cache()
-    return cache.get_stats()
-
-
-@router.delete("/cache/clear")
-async def clear_cache(current_user: dict = Depends(require_admin)):
-    """Clear all semantic cache entries (admin only)"""
-    cache = get_semantic_cache()
-    cleared_count = await asyncio.to_thread(cache.clear)
-    return {
-        "status": "success",
-        "message": f"Cleared {cleared_count} cache entries"
-    }
