@@ -11,6 +11,7 @@ import logging
 import math
 from backend.chains.retriever_chroma import get_vectorstore
 from backend.services.query_classifier import is_reimbursement_related_async, get_chat_response
+from backend.services.query_rewriter import rewrite_query_with_context
 from backend.services.sqlite_client import (
     create_chat_message, 
     get_chat_history, 
@@ -85,8 +86,12 @@ async def chat_stream(request: ChatRequest, current_user: dict = Depends(require
             
             yield f"data: {json.dumps({'type': 'session_id', 'session_id': session_id})}\n\n"
             
-            # Check if query needs RAG retrieval (LLM-based classification)
-            needs_rag = await is_reimbursement_related_async(request.query)
+            # Rewrite query with context FIRST (before classification)
+            search_query = await rewrite_query_with_context(request.query, formatted_history)
+            logger.info(f"Original: '{request.query}' -> Rewritten: '{search_query}'")
+            
+            # Check if query needs RAG retrieval (using rewritten query for better context)
+            needs_rag = await is_reimbursement_related_async(search_query)
             
             if not needs_rag:
                 # Simple response without RAG (greetings, thanks, etc.)
@@ -105,10 +110,10 @@ async def chat_stream(request: ChatRequest, current_user: dict = Depends(require
             chain, retriever = get_rag_chain_streaming()
             vectorstore = get_vectorstore()
             
-            # Retrieve relevant documents 
+            # Retrieve relevant documents using rewritten query (search_query from above)
             docs_with_scores = await asyncio.to_thread(
                 vectorstore.similarity_search_with_score,
-                request.query,
+                search_query,
                 k=20
             )
             

@@ -66,12 +66,11 @@ def get_rag_chain_streaming():
     Context:
     {context}
 
-    Chat History:
+    This is the chat history, you can use it to remember the previous conversation:
     {chat_history}
 
-    Current Question:
+    Current Question from User:
     {question}
-
     """
     prompt = ChatPromptTemplate.from_template(template)
 

@@ -1,8 +1,3 @@
-"""
-LLM-based query classifier to determine if a query needs RAG retrieval.
-Uses a small/fast LLM call to classify queries accurately.
-"""
-
 from langchain_openai import ChatOpenAI
 from langchain_core.prompts import ChatPromptTemplate
 from backend.utils.config import settings
@@ -15,7 +10,7 @@ def get_classifier_llm():
     global _classifier_llm
     if _classifier_llm is None:
         _classifier_llm = ChatOpenAI(
-            model="gpt-4.1-nano",  # Fast and cheap model for classification
+            model="gpt-4.1-nano", 
             temperature=0,
             openai_api_key=settings.OPENAI_API_KEY,
             max_tokens=50
@@ -80,39 +75,30 @@ def is_reimbursement_related(query: str) -> bool:
 
 
 async def is_reimbursement_related_async(query: str) -> bool:
-    """
-    Async version of classification check.
-    """
+ 
     result = await classify_query(query)
     return result == "RAG"
 
 
 # Pre-defined responses for non-RAG queries
 CHAT_RESPONSES = {
-    "greeting": "Halo! 👋 Ada yang bisa saya bantu terkait data reimbursement?",
-    "thanks": "Sama-sama! 😊 Jika ada pertanyaan lain tentang reimbursement, silakan tanyakan.",
-    "ok": "Baik! Ada yang lain yang ingin ditanyakan?",
-    "bye": "Sampai jumpa! 👋",
-    "default": "Saya adalah asisten khusus untuk data reimbursement. Silakan tanyakan tentang data reimburse karyawan."
+      "default": "Saya adalah asisten khusus untuk data reimbursement. Silakan tanyakan tentang data reimburse karyawan."
 }
 
 
 async def get_chat_response(query: str) -> str:
-    """
-    Get a contextual response for non-RAG queries using LLM.
-    """
     try:
         llm = get_classifier_llm()
         prompt = ChatPromptTemplate.from_template("""
-Kamu adalah asisten ramah untuk sistem reimbursement.
-User mengirim pesan yang BUKAN tentang data reimbursement (sapaan/ucapan terima kasih/dll).
+        Kamu adalah asisten ramah untuk sistem reimbursement.
+        User mengirim pesan yang BUKAN tentang data reimbursement (sapaan/ucapan terima kasih/dll).
 
-Balas dengan singkat dan ramah dalam Bahasa Indonesia.
-Jika relevan, ingatkan bahwa kamu bisa membantu untuk data reimbursement.
+        Balas dengan singkat dan ramah dalam Bahasa Indonesia.
+        Jika relevan, ingatkan bahwa kamu bisa membantu untuk data reimbursement.
 
-Pesan user: "{query}"
+        Pesan user: "{query}"
 
-Balasan singkat (1-2 kalimat):
+        Balasan singkat (1-2 kalimat):
 """)
         chain = prompt | llm
         result = await chain.ainvoke({"query": query})
@@ -124,9 +110,6 @@ Balasan singkat (1-2 kalimat):
 
 
 def get_non_rag_response(query: str) -> str:
-    """
-    Synchronous wrapper for getting non-RAG response.
-    """
     import asyncio
     try:
         loop = asyncio.get_event_loop()
