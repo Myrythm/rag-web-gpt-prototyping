@@ -7,7 +7,8 @@ def get_vectorstore():
     return Chroma(
         collection_name="rag_collection",
         embedding_function=embedding_function,
-        persist_directory=settings.CHROMA_PERSIST_DIRECTORY
+        persist_directory=settings.CHROMA_PERSIST_DIRECTORY,
+        collection_metadata={"hnsw:space": "cosine"}  # Cosine similarity
     )
 
 def get_retriever():

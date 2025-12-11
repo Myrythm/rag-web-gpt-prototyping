@@ -2,7 +2,7 @@ import os
 from pydantic_settings import BaseSettings
 
 class Settings(BaseSettings):
-    PROJECT_NAME: str = "RAG Web"
+    PROJECT_NAME: str = "rag-web-prototyping"
     API_V1_STR: str = "/api/v1"
     SECRET_KEY: str = "NGAPAIN-YAK"  
     ALGORITHM: str = "HS256"

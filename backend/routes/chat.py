@@ -8,6 +8,9 @@ import uuid
 import json
 import asyncio
 import logging
+import math
+from backend.chains.retriever_chroma import get_vectorstore
+from backend.services.query_classifier import is_reimbursement_related_async, get_chat_response
 from backend.services.sqlite_client import (
     create_chat_message, 
     get_chat_history, 
@@ -17,9 +20,7 @@ from backend.services.sqlite_client import (
     update_session_title,
     delete_session
 )
-# Note: Using vectorstore similarity score instead of LLM classifier for efficiency
             
-# Setup logging
 logger = logging.getLogger(__name__)
 logging.basicConfig(
     level=logging.INFO,
@@ -32,7 +33,6 @@ class ChatRequest(BaseModel):
     query: str
     session_id: Optional[str] = None
 
-# Note: Non-streaming /chat endpoint removed - frontend only uses /chat/stream
 
 @router.get("/chat/sessions")
 async def get_sessions(current_user: dict = Depends(require_user)):
@@ -53,7 +53,6 @@ async def update_session(session_id: str, update: SessionUpdate, current_user: d
 
 @router.delete("/chat/sessions/{session_id}")
 async def delete_session_route(session_id: str, current_user: dict = Depends(require_user)):
-    # Check if session belongs to user
     user = await get_user_by_username(current_user["username"])
     sessions = await get_user_sessions(user["id"])
     session_ids = [s["id"] for s in sessions]
@@ -66,102 +65,96 @@ async def delete_session_route(session_id: str, current_user: dict = Depends(req
 
 @router.post("/chat/stream")
 async def chat_stream(request: ChatRequest, current_user: dict = Depends(require_user)):
-    """Stream chat responses using Server-Sent Events"""
     user = await get_user_by_username(current_user["username"])
     user_id = user["id"]
     
     session_id = request.session_id
     
-    # Create session if not exists
     if not session_id:
         session_id = str(uuid.uuid4())
         title = request.query[:30] + "..." if len(request.query) > 30 else request.query
         await create_chat_session(session_id, user_id, title)
     
-    # Get history
     history = await get_chat_history(session_id)
     formatted_history = "\n".join([f"{msg['role']}: {msg['content']}" for msg in history])
     
-    # Save user message
     await create_chat_message(user_id, "user", request.query, session_id)
     
     async def generate():
         try:
             
-            # Get retriever and chain
-            from backend.chains.rag_chain import get_simple_chat_chain
-            from backend.chains.retriever_chroma import get_vectorstore
+            yield f"data: {json.dumps({'type': 'session_id', 'session_id': session_id})}\n\n"
             
+            # Check if query needs RAG retrieval (LLM-based classification)
+            needs_rag = await is_reimbursement_related_async(request.query)
+            
+            if not needs_rag:
+                # Simple response without RAG (greetings, thanks, etc.)
+                response = await get_chat_response(request.query)
+                
+                # Stream the response word by word for consistency
+                for word in response.split():
+                    yield f"data: {json.dumps({'type': 'token', 'content': word + ' '})}\n\n"
+                    await asyncio.sleep(0.02)  # Small delay for natural feel
+                
+                await create_chat_message(user_id, "assistant", response, session_id)
+                yield f"data: {json.dumps({'type': 'done'})}\n\n"
+                return
+            
+            # RAG flow for reimbursement-related queries
             chain, retriever = get_rag_chain_streaming()
             vectorstore = get_vectorstore()
             
-            # Retrieve documents with similarity scores
-            # Note: Use vectorstore directly, not retriever, for similarity_search_with_score
+            # Retrieve relevant documents 
             docs_with_scores = await asyncio.to_thread(
                 vectorstore.similarity_search_with_score,
                 request.query,
-                k=3
+                k=20
             )
             
-            # Determine if RAG is needed based on similarity score
-            # ChromaDB with OpenAI embeddings uses L2 distance: lower score = more similar
-            # Based on testing with text-embedding-3-small:
-            #   - Score < 1.0:  Very relevant documents
-            #   - Score 1.0-1.5: Possibly relevant documents  
-            #   - Score > 1.5: Not relevant (general conversation)
-            needs_rag = False
-            similarity_score = float('inf')
-            
-            if docs_with_scores:
-                # Get the best (lowest) distance score
-                similarity_score = docs_with_scores[0][1]
-                
-                # Threshold: 1.5 for L2 distance with OpenAI embeddings
-                # Documents within 1.5 distance are considered relevant
-                if similarity_score < 1.5:
-                    needs_rag = True
-            
-            # Log classification result with similarity score
-            if needs_rag:
-                logger.info(f"USED RAG (similarity score: {similarity_score:.4f})")
-            else:
-                logger.info(f"NOT USED RAG (similarity score: {similarity_score:.4f})")
-            
-            # Send session_id first
-            yield f"data: {json.dumps({'type': 'session_id', 'session_id': session_id})}\n\n"
-            
             full_response = ""
+            docs = [doc for doc, score in docs_with_scores]
             
-            if needs_rag:
-                # Use RAG with already-retrieved documents (no second retrieval!)
-                docs = [doc for doc, score in docs_with_scores]
-                
-                # Stream the response with context
-                async for chunk in chain.astream({
-                    "context": docs,
-                    "question": request.query,
-                    "chat_history": formatted_history
-                }):
-                    if chunk:
-                        full_response += chunk
-                        yield f"data: {json.dumps({'type': 'token', 'content': chunk})}\n\n"
-            else:
-                # Use simple chat for conversational queries (much faster!)
-                simple_chain = get_simple_chat_chain()
-                
-                # Stream the response without RAG overhead
-                async for chunk in simple_chain.astream({
-                    "question": request.query,
-                    "chat_history": formatted_history
-                }):
-                    if chunk:
-                        full_response += chunk
-                        yield f"data: {json.dumps({'type': 'token', 'content': chunk})}\n\n"
+            async for chunk in chain.astream({
+                "context": docs,
+                "question": request.query,
+                "chat_history": formatted_history
+            }):
+                if chunk:
+                    full_response += chunk
+                    yield f"data: {json.dumps({'type': 'token', 'content': chunk})}\n\n"
             
-            # Save assistant message
             await create_chat_message(user_id, "assistant", full_response, session_id)
             
-            # Send done signal
+            # Show sources only for RAG queries (limit to top 3 unique sources for display)
+            if docs_with_scores:
+                sources = []
+                seen_sources = set()  # Avoid duplicate filenames
+                
+                for i, (doc, score) in enumerate(docs_with_scores):
+                    source_name = doc.metadata.get("source", "Unknown")
+                    
+                    # Skip if already shown this source
+                    if source_name in seen_sources:
+                        continue
+                    
+                    similarity_pct = 100 * math.exp(-score * 0.5)
+                    
+                    if similarity_pct >= 60:
+                        seen_sources.add(source_name)
+                        sources.append({
+                            "number": len(sources) + 1,
+                            "source": source_name,
+                            "similarity": round(similarity_pct, 1)
+                        })
+                    
+                    # Limit to top 5 sources for display
+                    if len(sources) >= 3:
+                        break
+                
+                if sources:
+                    yield f"data: {json.dumps({'type': 'sources', 'sources': sources})}\n\n"
+            
             yield f"data: {json.dumps({'type': 'done'})}\n\n"
             
         except Exception as e:

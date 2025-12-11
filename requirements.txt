@@ -13,3 +13,4 @@ aiosqlite
 pydantic-settings
 langchain-community
 sqlalchemy
+python-docx

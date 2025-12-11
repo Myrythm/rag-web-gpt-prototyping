@@ -3,7 +3,6 @@ import os
 import uuid
 from typing import List
 from fastapi import APIRouter, UploadFile, File, Depends, HTTPException
-import fitz  # PyMuPDF
 from backend.services.sqlite_client import (
     create_document, 
     get_all_documents, 
@@ -20,6 +19,7 @@ from backend.services.sqlite_client import (
     delete_user
 )
 from backend.services.chunker import chunk_text
+from backend.services.file_converter import convert_to_markdown, get_supported_extensions
 from backend.chains.retriever_chroma import get_vectorstore
 from backend.utils.security import require_admin, get_password_hash
 from backend.utils.config import settings
@@ -28,116 +28,67 @@ from pydantic import BaseModel
 
 router = APIRouter(prefix="/admin", tags=["admin"])
 
-
-def extract_text_with_tables(doc) -> str:
-    """
-    Extract text from PDF with better table handling.
-    Uses PyMuPDF's table detection to preserve table structure.
-    """
-    full_text = []
-    
-    for page_num, page in enumerate(doc):
-        page_text_parts = []
-        
-        # Try to find tables on this page
-        try:
-            tables = page.find_tables()
-            
-            if tables.tables:
-                # Page has tables - extract them with structure
-                for table in tables.tables:
-                    table_data = table.extract()
-                    
-                    if table_data:
-                        # Format table as structured text
-                        # Each row becomes a clear line with column headers context
-                        headers = table_data[0] if table_data else []
-                        
-                        for row_idx, row in enumerate(table_data):
-                            if row_idx == 0:
-                                # Header row
-                                header_text = " | ".join([str(cell) if cell else "" for cell in row])
-                                page_text_parts.append(f"[Table Header]: {header_text}")
-                            else:
-                                # Data row - pair with headers for context
-                                row_parts = []
-                                for col_idx, cell in enumerate(row):
-                                    if cell:
-                                        header = headers[col_idx] if col_idx < len(headers) and headers[col_idx] else f"Column{col_idx+1}"
-                                        row_parts.append(f"{header}: {cell}")
-                                
-                                if row_parts:
-                                    page_text_parts.append(" | ".join(row_parts))
-                        
-                        page_text_parts.append("")  # Empty line after table
-                
-                # Also get non-table text from the page
-                # Get text blocks and filter out those that overlap with tables
-                non_table_text = []
-                blocks = page.get_text("blocks")
-                table_rects = [fitz.Rect(t.bbox) for t in tables.tables]
-                
-                for block in blocks:
-                    if block[6] == 0:  # Text block
-                        block_rect = fitz.Rect(block[:4])
-                        # Check if this block overlaps with any table
-                        is_in_table = any(block_rect.intersects(tr) for tr in table_rects)
-                        if not is_in_table:
-                            non_table_text.append(block[4].strip())
-                
-                if non_table_text:
-                    page_text_parts.insert(0, "\n".join(non_table_text))
-            else:
-                # No tables found - use regular text extraction
-                page_text_parts.append(page.get_text())
-                
-        except Exception as e:
-            # Fallback to regular text extraction if table detection fails
-            page_text_parts.append(page.get_text())
-        
-        if page_text_parts:
-            full_text.append(f"\n--- Page {page_num + 1} ---\n" + "\n".join(page_text_parts))
-    
-    return "\n\n".join(full_text)
-
-
 @router.post("/upload")
-async def upload_document(
-    file: UploadFile = File(...),
+async def upload_documents(
+    files: List[UploadFile] = File(...),
     current_user: dict = Depends(require_admin)
 ):
-    # 1. Read content
-    content = await file.read()
+    supported = get_supported_extensions()
+    results = []
+    errors = []
     
-    # 2. Extract text using PyMuPDF with improved table handling
-    try:
-        doc = fitz.open(stream=content, filetype="pdf")
-        text = extract_text_with_tables(doc)
-        doc.close()
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=f"Error processing PDF: {str(e)}")
+    for file in files:
+        try:
+            # Check file extension
+            ext = file.filename.lower().split(".")[-1]
+            if ext not in supported:
+                raise ValueError(f"Unsupported file type: {ext}. Supported: {', '.join(supported)}")
+            
+            # 1. Read content
+            content = await file.read()
+            
+            # 2. Convert to Markdown (universal converter)
+            markdown_text = convert_to_markdown(content, file.filename)
+            
+            # 3. Chunk using Markdown-aware splitter
+            chunks = chunk_text(markdown_text)
+            
+            # 4. ID generation
+            doc_id = str(uuid.uuid4())
+            
+            # 5. Add to Chroma
+            vectorstore = get_vectorstore()
+            # Add metadata to allow deletion by doc_id
+            metadatas = [{"document_id": doc_id, "source": file.filename} for _ in chunks]
+            vectorstore.add_texts(texts=chunks, metadatas=metadatas)
+            
+            # 6. Save to SQLite
+            doc_data = {
+                "id": doc_id,
+                "filename": file.filename,
+                "chunk_count": len(chunks)
+            }
+            await create_document(doc_data)
+            
+            results.append({
+                "id": doc_id, 
+                "filename": file.filename, 
+                "chunks": len(chunks),
+                "status": "success"
+            })
+        except Exception as e:
+            errors.append({
+                "filename": file.filename,
+                "error": str(e),
+                "status": "failed"
+            })
     
-    # 3. Chunk
-    chunks = chunk_text(text)
-    
-    # 4. ID generation
-    doc_id = str(uuid.uuid4())
-    
-    # 5. Add to Chroma
-    vectorstore = get_vectorstore()
-    # Add metadata to allow deletion by doc_id
-    metadatas = [{"document_id": doc_id, "source": file.filename} for _ in chunks]
-    vectorstore.add_texts(texts=chunks, metadatas=metadatas)
-    
-    # 6. Save to SQLite
-    doc_data = {
-        "id": doc_id,
-        "filename": file.filename,
-        "chunk_count": len(chunks)
+    return {
+        "uploaded": len(results),
+        "failed": len(errors),
+        "results": results,
+        "errors": errors
     }
-    await create_document(doc_data)
-    
-    return {"id": doc_id, "filename": file.filename, "chunks": len(chunks)}
 
 
 @router.get("/documents")
@@ -174,6 +125,40 @@ async def delete_doc(doc_id: str, current_user: dict = Depends(require_admin)):
         print(f"Error deleting from Chroma: {e}")
     
     return {"status": "deleted", "id": doc_id}
+
+
+class BulkDeleteRequest(BaseModel):
+    document_ids: list[str]
+
+
+@router.post("/documents/bulk-delete")
+async def bulk_delete_docs(request: BulkDeleteRequest, current_user: dict = Depends(require_admin)):
+    """Delete multiple documents at once."""
+    deleted = []
+    errors = []
+    
+    vectorstore = get_vectorstore()
+    
+    for doc_id in request.document_ids:
+        try:
+            # Delete from SQLite
+            await delete_document(doc_id)
+            
+            # Delete from Chroma
+            try:
+                vectorstore._collection.delete(where={"document_id": doc_id})
+            except Exception as e:
+                print(f"Error deleting {doc_id} from Chroma: {e}")
+            
+            deleted.append(doc_id)
+        except Exception as e:
+            errors.append({"id": doc_id, "error": str(e)})
+    
+    return {
+        "deleted_count": len(deleted),
+        "deleted": deleted,
+        "errors": errors
+    }
 
 
 @router.get("/stats")

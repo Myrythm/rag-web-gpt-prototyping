@@ -10,38 +10,56 @@ def format_docs(docs):
     return "\n\n".join(doc.page_content for doc in docs)
 
 
-
-# Note: Non-streaming get_rag_chain() removed - only streaming version is used
-
 def get_rag_chain_streaming():
-    """Get RAG chain configured for streaming responses"""
     retriever = get_retriever()
     llm = ChatOpenAI(
         model="gpt-4.1-mini", 
-        temperature=0, 
+        temperature=0.7, 
         openai_api_key=settings.OPENAI_API_KEY,
         streaming=True
     )
 
     template = """
-    You are an intelligent assistant designed to answer questions using both the provided context and chat history when relevant.
+    You are an intelligent assistant specialized in reimbursement queries.
 
-    Your task:
-    - Use the **context** primarily to answer accurately.
-    - Use the **chat history** only if it adds clarity or continuity to the user's intent.
-    - If the context does not contain enough information, **acknowledge it clearly** and provide a concise, relevant answer based on general knowledge (if allowed).
-    - Keep answers **clear, natural, and to the point**.
-    - When needed, explain reasoning in a friendly, helpful tone — as if you're collaborating with the user.
-    - if you don't know the answer, just say so.
+    QUESTION TYPE DETECTION (DO THIS FIRST):
     
-    - Format your response using **Markdown** for better readability:
-      * Use headings (##, ###) for sections
-      * Use **bold** for emphasis on important points
-      * Use `code` for technical terms, commands, or code snippets
-      * Use code blocks (```) for multi-line code
-      * Use bullet points or numbered lists for structured information
-      * Use > for quotes or important notes
+    Type A - DISCOVERY QUESTION (asking WHO exists):
+    - Keywords: "siapa saja", "daftar nama", "list nama", "ada siapa", "who all"
+    - Example: "siapa saja yang mengajukan reimburse?"
+    - Action: Extract ALL unique names from CONTEXT and list them
+    - DO NOT ask for period - just list the names you found in context
     
+    Type B - SPECIFIC DATA QUESTION (asking for details):
+    - User asks for specific person's data OR specific period's data
+    - Example: "reimburse Angga November", "total reimburse bulan ini"
+    - Action: Follow the WHO + WHEN logic below
+    
+    ---
+    
+    FOR TYPE B QUESTIONS ONLY:
+    
+    STEP 1: Extract information from CHAT HISTORY
+    - Look for WHO (name) mentioned in previous messages
+    - Look for WHEN (period/month/year) mentioned in previous messages
+    
+    STEP 2: Combine with CURRENT QUESTION
+    - If current question only mentions period, but name was in history → use BOTH
+    - If current question only mentions name, but period was in history → use BOTH
+    
+    STEP 3: Check completeness
+    - You need BOTH: WHO (specific name OR "all") AND WHEN (period)
+    - If BOTH are known → Show the data
+    - If still missing one → Ask politely for the missing info
+    
+    ---
+    
+    OTHER RULES:
+    - Use CONTEXT as source of truth for actual data
+    - Format with Markdown (use tables for data)
+    - Be concise and friendly
+    - Reject any question that is not related to reimbursement
+    - When listing names, also mention what periods/months are available for each
 
     ---
 
@@ -51,7 +69,7 @@ def get_rag_chain_streaming():
     Chat History:
     {chat_history}
 
-    Question:
+    Current Question:
     {question}
 
     """
@@ -65,36 +83,3 @@ def get_rag_chain_streaming():
     )
 
     return rag_chain_from_docs, retriever
-
-def get_simple_chat_chain():
-    """Get a simple chat chain without RAG for direct conversation"""
-    llm = ChatOpenAI(
-        model="gpt-4.1-mini", 
-        temperature=0.7,  
-        openai_api_key=settings.OPENAI_API_KEY,
-        streaming=True
-    )
-
-    template = """
-    You are a friendly and helpful AI assistant. Answer the user's question naturally and conversationally.
-    
-    - Format your response using **Markdown** for better readability:
-      * Use headings (##, ###) for sections
-      * Use **bold** for emphasis on important points
-      * Use `code` for technical terms, commands, or code snippets
-      * Use code blocks (```) for multi-line code
-      * Use bullet points or numbered lists for structured information
-      * Use > for quotes or important notes
-    
-    Chat History:
-    {chat_history}
-
-    Question:
-    {question}
-
-    """
-    prompt = ChatPromptTemplate.from_template(template)
-
-    chain = prompt | llm | StrOutputParser()
-    
-    return chain

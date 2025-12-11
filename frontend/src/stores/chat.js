@@ -60,6 +60,9 @@ export const useChatStore = defineStore('chat', () => {
                 }
               } else if (data.type === 'token') {
                 messages.value[assistantMessageIndex].content += data.content
+              } else if (data.type === 'sources') {
+                // Attach sources to the assistant message
+                messages.value[assistantMessageIndex].sources = data.sources
               } else if (data.type === 'done') {
                 messages.value[assistantMessageIndex].streaming = false
                 loading.value = false
