@@ -152,7 +152,6 @@ API Documentation: **http://localhost:8000/docs**
 
 ```bash
 cd frontend
-npm install
 npm run dev
 ```
 
