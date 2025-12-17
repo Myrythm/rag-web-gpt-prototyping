@@ -5,7 +5,7 @@ from backend.utils.config import settings
 
 def get_rewriter_llm():
     return ChatOpenAI(
-        model="gpt-4.1-mini",
+        model="gpt-5-nano",
         temperature=0,
         openai_api_key=settings.OPENAI_API_KEY
     )
@@ -13,8 +13,8 @@ def get_rewriter_llm():
 
 async def rewrite_query_with_context(query: str, chat_history: str) -> str:   
     # If no history, return as-is
-    if not chat_history or not chat_history.strip():
-        return query
+    # if not chat_history or not chat_history.strip():
+    #     return query
     
     # Short queries likely need context from history
     if len(query.split()) > 5:
@@ -34,7 +34,8 @@ async def rewrite_query_with_context(query: str, chat_history: str) -> str:
         2. Combine with the current query to make it searchable
         3. Keep it concise - just the key search terms
         4. Output ONLY the rewritten query, nothing else
-        5. If the query is already complete, return it as-is
+        5. If the query only contains name and period, add reimburse (e.g. "reimburse Ancika November")
+        6. If the query is already complete, return it as-is
 
         ---
         Chat History:

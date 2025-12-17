@@ -36,17 +36,27 @@ router.beforeEach(async (to, from, next) => {
     return next('/login');
   }
 
-  if (to.meta.requiresAdmin) {
-    if (token) {
-        try {
-            const payload = JSON.parse(atob(token.split('.')[1]))
-            if (payload.role !== 'admin') {
-                return next('/')
-            }
-        } catch (e) {
-            return next('/login')
-        }
+  // Parse user role from token
+  let userRole = null;
+  if (token) {
+    try {
+      const payload = JSON.parse(atob(token.split('.')[1]));
+      userRole = payload.role;
+    } catch (e) {
+      // Invalid token, redirect to login
+      localStorage.removeItem('token');
+      return next('/login');
     }
+  }
+
+  // Redirect admin to /admin if they try to access user chat page
+  if (to.path === '/' && userRole === 'admin') {
+    return next('/admin');
+  }
+
+  // Prevent non-admin from accessing admin pages
+  if (to.meta.requiresAdmin && userRole !== 'admin') {
+    return next('/');
   }
 
   next();

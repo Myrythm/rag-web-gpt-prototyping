@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
-from backend.chains.rag_chain import get_rag_chain_streaming
+from backend.chains.rag_chain import get_rag_chain
 from backend.utils.security import require_user, require_admin
 from typing import Optional
 import uuid
@@ -106,8 +106,8 @@ async def chat_stream(request: ChatRequest, current_user: dict = Depends(require
                 yield f"data: {json.dumps({'type': 'done'})}\n\n"
                 return
             
-            # RAG flow for reimbursement-related queries
-            chain, retriever = get_rag_chain_streaming()
+            # RAG flow 
+            chain, retriever = get_rag_chain()
             vectorstore = get_vectorstore()
             
             # Retrieve relevant documents using rewritten query (search_query from above)
@@ -153,8 +153,8 @@ async def chat_stream(request: ChatRequest, current_user: dict = Depends(require
                             "similarity": round(similarity_pct, 1)
                         })
                     
-                    # Limit to top 5 sources for display
-                    if len(sources) >= 3:
+                    #  n-top sources for display
+                    if len(sources) == 1:
                         break
                 
                 if sources:
