@@ -166,11 +166,12 @@ async def get_stats(current_user: dict = Depends(require_admin)):
     doc_count = await get_document_count()
     total_chunks = await get_total_chunks()
     user_count = await get_user_count()
+    traces = get_recent_traces(limit=10)
     return {
         "total_documents": doc_count,
         "total_chunks": total_chunks,
         "total_users": user_count,
-        "recent_traces": []
+        "recent_traces": traces
     }
 
 

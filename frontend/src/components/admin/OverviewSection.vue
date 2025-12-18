@@ -51,6 +51,60 @@
         <h3 class="text-gray-400 uppercase text-sm font-semibold">Total Users</h3>
       </div>
     </div>
+
+    <!-- Recent Traces Section -->
+    <div class="mt-8 bg-gray-800/50 backdrop-blur-xl border border-gray-700/50 p-6 rounded-2xl">
+      <div class="flex items-center justify-between mb-6">
+        <div class="flex items-center gap-3">
+          <div class="p-2 bg-amber-500/10 rounded-lg">
+            <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6 text-amber-400" viewBox="0 0 20 20" fill="currentColor">
+              <path fill-rule="evenodd" d="M6 2a2 2 0 00-2 2v12a2 2 0 002 2h8a2 2 0 002-2V7.414A2 2 0 0015.414 6L12 2.586A2 2 0 0010.586 2H6zm2 10a1 1 0 10-2 0v3a1 1 0 102 0v-3zm2-3a1 1 0 011 1v5a1 1 0 11-2 0v-5a1 1 0 011-1zm4-1a1 1 0 10-2 0v7a1 1 0 102 0V8z" clip-rule="evenodd" />
+            </svg>
+          </div>
+          <h3 class="text-xl font-semibold text-white">Recent LLM Traces</h3>
+        </div>
+        <a 
+          href="https://smith.langchain.com" 
+          target="_blank"
+          class="text-sm text-amber-400 hover:text-amber-300 transition-colors"
+        >
+          Open LangSmith →
+        </a>
+      </div>
+
+      <div v-if="stats.recent_traces && stats.recent_traces.length > 0" class="space-y-3">
+        <div 
+          v-for="trace in stats.recent_traces" 
+          :key="trace.id"
+          class="flex items-center justify-between p-4 bg-gray-700/30 rounded-xl hover:bg-gray-700/50 transition-colors"
+        >
+          <div class="flex items-center gap-4">
+            <span 
+              class="px-2 py-1 text-xs font-medium rounded-full"
+              :class="getStatusClass(trace.status)"
+            >
+              {{ trace.status }}
+            </span>
+            <span class="text-gray-200 font-medium">{{ trace.name }}</span>
+          </div>
+          <div class="flex items-center gap-6 text-sm">
+            <span v-if="trace.latency" class="text-gray-400">
+              {{ formatLatency(trace.latency) }}
+            </span>
+            <span class="text-gray-500">
+              {{ formatTime(trace.start_time) }}
+            </span>
+          </div>
+        </div>
+      </div>
+
+      <div v-else class="text-center py-8 text-gray-500">
+        <svg xmlns="http://www.w3.org/2000/svg" class="h-12 w-12 mx-auto mb-3 opacity-50" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
+        </svg>
+        <p>No traces yet. Configure LANGCHAIN_API_KEY to enable tracing.</p>
+      </div>
+    </div>
   </div>
 </template>
 
@@ -59,7 +113,25 @@ defineProps({
   stats: {
     type: Object,
     required: true,
-    default: () => ({ total_documents: 0, total_chunks: 0, total_users: 0 })
+    default: () => ({ total_documents: 0, total_chunks: 0, total_users: 0, recent_traces: [] })
   }
 });
+
+const getStatusClass = (status) => {
+  if (status === 'success') return 'bg-green-500/20 text-green-400';
+  if (status === 'error') return 'bg-red-500/20 text-red-400';
+  return 'bg-gray-500/20 text-gray-400';
+};
+
+const formatLatency = (ms) => {
+  if (ms < 1000) return `${Math.round(ms)}ms`;
+  return `${(ms / 1000).toFixed(2)}s`;
+};
+
+const formatTime = (isoString) => {
+  if (!isoString) return '';
+  const date = new Date(isoString);
+  return date.toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' });
+};
 </script>
+
