@@ -48,8 +48,10 @@ marked.use({ renderer });
 
 const renderedMarkdown = computed(() => {
   try {
+    // Remove citation markers [ref:N] from the content before rendering
+    const cleanContent = props.content.replace(/\s*\[ref:\d+\]/g, '');
     // Parse markdown to HTML
-    const rawHtml = marked.parse(props.content);
+    const rawHtml = marked.parse(cleanContent);
     // Sanitize HTML to prevent XSS attacks
     return DOMPurify.sanitize(rawHtml);
   } catch (error) {

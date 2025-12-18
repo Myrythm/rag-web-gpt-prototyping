@@ -9,6 +9,8 @@ import json
 import asyncio
 import logging
 import math
+import re
+import time
 from backend.chains.retriever_chroma import get_vectorstore
 from backend.services.query_classifier import is_reimbursement_related_async, get_chat_response
 from backend.services.query_rewriter import rewrite_query_with_context
@@ -83,26 +85,50 @@ async def chat_stream(request: ChatRequest, current_user: dict = Depends(require
     
     async def generate():
         try:
+            start_time = time.time()
             
             yield f"data: {json.dumps({'type': 'session_id', 'session_id': session_id})}\n\n"
             
-            # Rewrite query with context FIRST (before classification)
-            search_query = await rewrite_query_with_context(request.query, formatted_history)
-            logger.info(f"Original: '{request.query}' -> Rewritten: '{search_query}'")
-            
-            # Check if query needs RAG retrieval (using rewritten query for better context)
-            needs_rag = await is_reimbursement_related_async(search_query)
-            
-            if not needs_rag:
-                # Simple response without RAG (greetings, thanks, etc.)
-                response = await get_chat_response(request.query)
+            # Check for simple greetings FIRST (no LLM needed)
+            from backend.services.query_classifier import is_simple_greeting, get_instant_response
+            if is_simple_greeting(request.query):
+                response = get_instant_response(request.query)
                 
-                # Stream the response word by word for consistency
+                # Stream instantly
                 for word in response.split():
                     yield f"data: {json.dumps({'type': 'token', 'content': word + ' '})}\n\n"
-                    await asyncio.sleep(0.02)  # Small delay for natural feel
                 
                 await create_chat_message(user_id, "assistant", response, session_id)
+                total_time = time.time() - start_time
+                logger.info(f"INSTANT RESPONSE: {total_time:.2f}s (simple greeting)")
+                yield f"data: {json.dumps({'type': 'done'})}\n\n"
+                return
+            
+            # Rewrite query with context (for non-greeting queries)
+            t1 = time.time()
+            search_query = await rewrite_query_with_context(request.query, formatted_history)
+            rewrite_time = time.time() - t1
+            logger.info(f"[{rewrite_time:.2f}s] QUERY REWRITING: '{request.query}' -> '{search_query}'")
+            
+            # Check if query needs RAG retrieval
+            t2 = time.time()
+            needs_rag = await is_reimbursement_related_async(search_query)
+            classify_time = time.time() - t2
+            logger.info(f"[{classify_time:.2f}s] CLASSIFICATION: Needs RAG = {needs_rag}")
+            
+            if not needs_rag:
+                # Non-RAG response (longer conversational messages)
+                t3 = time.time()
+                response = await get_chat_response(request.query)
+                chat_time = time.time() - t3
+                
+                for word in response.split():
+                    yield f"data: {json.dumps({'type': 'token', 'content': word + ' '})}\n\n"
+                    await asyncio.sleep(0.02)
+                
+                await create_chat_message(user_id, "assistant", response, session_id)
+                total_time = time.time() - start_time
+                logger.info(f"NON-RAG RESPONSE: {total_time:.2f}s (rewrite: {rewrite_time:.2f}s, classify: {classify_time:.2f}s, chat: {chat_time:.2f}s)")
                 yield f"data: {json.dumps({'type': 'done'})}\n\n"
                 return
             
@@ -110,56 +136,72 @@ async def chat_stream(request: ChatRequest, current_user: dict = Depends(require
             chain, retriever = get_rag_chain()
             vectorstore = get_vectorstore()
             
-            # Retrieve relevant documents using rewritten query (search_query from above)
+            # Retrieve relevant documents using rewritten query
+            t3 = time.time()
             docs_with_scores = await asyncio.to_thread(
                 vectorstore.similarity_search_with_score,
                 search_query,
-                k=20
+                k=10
             )
+            retrieval_time = time.time() - t3
+            logger.info(f"[{retrieval_time:.2f}s] RETRIEVED {len(docs_with_scores)} DOCUMENTS")
             
             full_response = ""
             docs = [doc for doc, score in docs_with_scores]
             
+            t4 = time.time()
+            first_token_time = None
             async for chunk in chain.astream({
                 "context": docs,
                 "question": request.query,
                 "chat_history": formatted_history
             }):
                 if chunk:
+                    if first_token_time is None:
+                        first_token_time = time.time() - t4
+                        logger.info(f"[{first_token_time:.2f}s] First token received")
                     full_response += chunk
                     yield f"data: {json.dumps({'type': 'token', 'content': chunk})}\n\n"
             
-            await create_chat_message(user_id, "assistant", full_response, session_id)
+            generation_time = time.time() - t4
             
-            # Show sources only for RAG queries (limit to top 3 unique sources for display)
-            if docs_with_scores:
+            # Parse citations from response [ref:N] format
+            cited_refs = set(map(int, re.findall(r'\[ref:(\d+)\]', full_response)))
+            logger.info(f"Cited references: {cited_refs}")
+            
+            # Clean response by removing citation markers for saved version
+            clean_response = re.sub(r'\s*\[ref:\d+\]', '', full_response)
+            await create_chat_message(user_id, "assistant", clean_response, session_id)
+            
+            # Show only sources that were actually cited by the LLM
+            if cited_refs and docs_with_scores:
                 sources = []
                 seen_sources = set()  # Avoid duplicate filenames
                 
-                for i, (doc, score) in enumerate(docs_with_scores):
-                    source_name = doc.metadata.get("source", "Unknown")
-                    
-                    # Skip if already shown this source
-                    if source_name in seen_sources:
-                        continue
-                    
-                    similarity_pct = 100 * math.exp(-score * 0.5)
-                    
-                    if similarity_pct >= 60:
+                for ref_num in sorted(cited_refs):
+                    # ref_num is 1-indexed, docs_with_scores is 0-indexed
+                    if ref_num <= len(docs_with_scores):
+                        doc, score = docs_with_scores[ref_num - 1]
+                        source_name = doc.metadata.get("source", "Unknown")
+                        
+                        # Skip if already shown this source
+                        if source_name in seen_sources:
+                            continue
+                        
                         seen_sources.add(source_name)
+                        similarity_pct = 100 * math.exp(-score * 0.5)
+                        
                         sources.append({
                             "number": len(sources) + 1,
                             "source": source_name,
                             "similarity": round(similarity_pct, 1)
                         })
-                    
-                    #  n-top sources for display
-                    if len(sources) == 1:
-                        break
                 
                 if sources:
                     yield f"data: {json.dumps({'type': 'sources', 'sources': sources})}\n\n"
             
+            total_time = time.time() - start_time
+            logger.info(f"RAG RESPONSE: {total_time:.2f}s (rewrite: {rewrite_time:.2f}s, classify: {classify_time:.2f}s, retrieval: {retrieval_time:.2f}s, generation: {generation_time:.2f}s)")
             yield f"data: {json.dumps({'type': 'done'})}\n\n"
             
         except Exception as e:

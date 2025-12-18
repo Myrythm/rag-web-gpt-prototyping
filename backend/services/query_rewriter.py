@@ -3,52 +3,45 @@ from langchain_core.prompts import ChatPromptTemplate
 from backend.utils.config import settings
 
 
+# Cache the LLM instance
+_rewriter_llm = None
+
 def get_rewriter_llm():
-    return ChatOpenAI(
-        model="gpt-5-nano",
-        temperature=0,
-        openai_api_key=settings.OPENAI_API_KEY
-    )
+    global _rewriter_llm
+    if _rewriter_llm is None:
+        _rewriter_llm = ChatOpenAI(
+            model="gpt-4.1-nano", 
+            temperature=0,
+            openai_api_key=settings.OPENAI_API_KEY,
+            max_tokens=100
+        )
+    return _rewriter_llm
 
 
 async def rewrite_query_with_context(query: str, chat_history: str) -> str:   
-    # If no history, return as-is
-    # if not chat_history or not chat_history.strip():
-    #     return query
+    # FAST PATH: If no history, return query as-is (no LLM needed)
+    if not chat_history or not chat_history.strip():
+        return query
     
-    # Short queries likely need context from history
+    # Long queries are usually complete, skip rewrite
     if len(query.split()) > 5:
         return query
     
     try:
         llm = get_rewriter_llm()
         
-        prompt = ChatPromptTemplate.from_template("""
-        You are a query rewriter for a reimbursement search system.
+        prompt = ChatPromptTemplate.from_template("""Rewrite this query for search by adding context from history.
 
-        Your task: Combine the user's SHORT/AMBIGUOUS query with relevant context from chat history 
-        to create a COMPLETE search query.
+        History: {chat_history}
 
-        RULES:
-        1. Extract relevant entities from history: names (Ancika, Angga, etc), periods (November, 2025, etc)
-        2. Combine with the current query to make it searchable
-        3. Keep it concise - just the key search terms
-        4. Output ONLY the rewritten query, nothing else
-        5. If the query only contains name and period, add reimburse (e.g. "reimburse Ancika November")
-        6. If the query is already complete, return it as-is
+        Query: "{query}"
 
-        ---
-        Chat History:
-        {chat_history}
-
-        Current Query: "{query}"
-
-        Rewritten Query (for search):""")
+        Rewritten (just the search terms):""")
         
         chain = prompt | llm
         result = await chain.ainvoke({
             "query": query,
-            "chat_history": chat_history
+            "chat_history": chat_history[-500:] 
         })
         
         rewritten = result.content.strip().strip('"').strip("'")
@@ -62,3 +55,4 @@ async def rewrite_query_with_context(query: str, chat_history: str) -> str:
     except Exception as e:
         print(f"Query rewrite error: {e}")
         return query
+
